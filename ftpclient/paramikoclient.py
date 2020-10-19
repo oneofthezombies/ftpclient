@@ -10,23 +10,23 @@ from ftpclient.interface import IFTPClient, TIMEOUT
 class SFTPClient(IFTPClient):
     def __init__(self, host: str, port: int = 22, username: Optional[str] = None, password: Optional[str] = None,
                  timeout: int = TIMEOUT):
-        self.host: str = host
-        self.port: int = port
-        self.username: Optional[str] = username
-        self.password: Optional[str] = password
-        self.timeout: int = timeout
-        self.ssh: Optional[paramiko.SSHClient] = None
-        self.client: Optional[paramiko.SFTPClient] = None
+        self.host = host
+        self.port = port
+        self.username = username
+        self.password = password
+        self.timeout = timeout
+        self.ssh = None
+        self.client = None
         self._connect()
 
     def __del__(self):
         self._disconnect()
 
     def _connect(self):
-        ssh: paramiko.SSHClient = paramiko.SSHClient()
+        ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy)
         ssh.connect(hostname=self.host, username=self.username, password=self.password, timeout=self.timeout)
-        client: paramiko.SFTPClient = ssh.open_sftp()
+        client = ssh.open_sftp()
         client.chdir('.')
         self.ssh = ssh
         self.client = client
