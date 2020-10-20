@@ -23,6 +23,7 @@ class SFTPClient(IFTPClient):
         self._disconnect()
 
     def _connect(self):
+        self._disconnect()
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy)
         ssh.connect(hostname=self.host, username=self.username, password=self.password, timeout=self.timeout)
@@ -39,55 +40,57 @@ class SFTPClient(IFTPClient):
             self.ssh.close()
             self.ssh = None
 
+    def create_directory(self, remote_path: str, is_exist_ok: bool = True) -> None:
+        pass
+
     def set_working_directory(self, remote_path: str, create_directory: bool = True) -> None:
         self.client.chdir(remote_path)
 
     def get_working_directory(self) -> str:
         return self.client.getcwd()
 
-    def create_directory(self, remote_path: str, is_exist_ok: bool = True) -> None:
-        pass
-
-    def get_contents(self, remote_path: str, create_directory: bool = True, is_recursive: bool = False) -> [str]:
+    def get_contents(self, remote_path: str, is_recursive: bool = False) -> [str]:
         contents = []
-        self._get_files_and_directories(remote_path, contents, contents, is_recursive)
+        self._get_files_and_directories(remote_path, '', contents, contents, is_recursive)
         return contents
 
     def get_files(self, remote_path: str, is_recursive: bool = False) -> [str]:
         files = []
         directories = [] if is_recursive else None
-        self._get_files_and_directories(remote_path, files, directories, is_recursive)
+        self._get_files_and_directories(remote_path, '', files, directories, is_recursive)
         return files
 
     def get_directories(self, remote_path: str, is_recursive: bool = False) -> [str]:
         directories = []
-        self._get_files_and_directories(remote_path, None, directories, is_recursive)
+        self._get_files_and_directories(remote_path, '', None, directories, is_recursive)
         return directories
 
     def get_files_and_directories(self, remote_path: str, is_recursive: bool = False) -> ([str], [str]):
         files = []
         directories = []
-        self._get_files_and_directories(remote_path, files, directories, is_recursive)
+        self._get_files_and_directories(remote_path, '', files, directories, is_recursive)
         return files, directories
 
-    def _get_files_and_directories(self, remote_path: str, out_files: Optional[List[str]],
-                                   out_directories: Optional[List[str]], is_recursive: bool = False) -> None:
+    def _get_files_and_directories(self, remote_path: str, traverse_directory: str,
+                                   out_files: Optional[List[str]], out_directories: Optional[List[str]],
+                                   is_recursive: bool = False) -> None:
         files = []
         directories = []
-        remote_path_object = PurePosixPath(remote_path)
-        for file in self.client.listdir_iter(remote_path):
+        traverse_path_object = PurePosixPath(remote_path) / traverse_directory
+        traverse_directory_object = PurePosixPath(traverse_directory)
+        for file in self.client.listdir_iter(str(traverse_path_object)):
             if file.longname.startswith('d'):
                 if out_directories is not None:
-                    directories.append(str(remote_path_object / f'{file.filename}/'))
+                    directories.append(f'{str(traverse_directory_object / file.filename)}/')
             else:
                 if out_files is not None:
-                    files.append(str(remote_path_object / file.filename))
+                    files.append(str(traverse_directory_object / file.filename))
         total_sub_directories = []
         if is_recursive:
             for directory in directories:
                 sub_files = [] if out_files is not None else None
                 sub_directories = []
-                self._get_files_and_directories(directory, sub_files, sub_directories, is_recursive)
+                self._get_files_and_directories(remote_path, directory, sub_files, sub_directories, is_recursive)
                 if out_files is not None:
                     files.extend(sub_files)
                 if out_directories is not None:
@@ -114,11 +117,123 @@ if __name__ == '__main__':
         username = password = 'hunhoekim'
         client = SFTPClient(host=host, username=username, password=password)
         assert client.get_working_directory() == '/'
+
+        client.set_working_directory('TDD')
+        assert client.get_working_directory() == '/TDD/'
         client.set_working_directory('/TDD')
         assert client.get_working_directory() == '/TDD/'
-        print(client.get_files_and_directories('.', is_recursive=True))
-        print(client.get_contents('.', is_recursive=True))
-        print(client.get_files('.', is_recursive=True))
-        print(client.get_directories('.', is_recursive=True))
+        client.set_working_directory('/TDD/')
+        assert client.get_working_directory() == '/TDD/'
 
+        result = (['1-1.txt', '1-2.txt'], ['1-1/', '1-2/'])
+        assert client.get_files_and_directories('', is_recursive=False) == result
+        assert client.get_files_and_directories('.', is_recursive=False) == result
+        assert client.get_files_and_directories('./', is_recursive=False) == result
+        assert client.get_files_and_directories('/TDD', is_recursive=False) == result
+        assert client.get_files_and_directories('/TDD/', is_recursive=False) == result
+
+        result = (['1-1.txt', '1-2.txt', '1-1/2-1.txt', '1-1/2-1/3-1.txt', '1-1/2-1/3-1/0-1.txt', '1-2/2-2.txt', '1-2/2-2/3-2.txt', '1-2/2-2/3-2/0-2.txt'], ['1-1/', '1-2/', '1-1/2-1/', '1-1/2-1/3-1/', '1-1/2-1/3-1/0-1/', '1-2/2-2/', '1-2/2-2/3-2/', '1-2/2-2/3-2/0-2/'])
+        assert client.get_files_and_directories('', is_recursive=True) == result
+        assert client.get_files_and_directories('.', is_recursive=True) == result
+        assert client.get_files_and_directories('./', is_recursive=True) == result
+        assert client.get_files_and_directories('/TDD', is_recursive=True) == result
+        assert client.get_files_and_directories('/TDD/', is_recursive=True) == result
+
+        result = (['2-1.txt'], ['2-1/'])
+        assert client.get_files_and_directories('1-1', is_recursive=False) == result
+        assert client.get_files_and_directories('./1-1', is_recursive=False) == result
+        assert client.get_files_and_directories('./1-1/', is_recursive=False) == result
+        assert client.get_files_and_directories('/TDD/1-1', is_recursive=False) == result
+        assert client.get_files_and_directories('/TDD/1-1/', is_recursive=False) == result
+
+        result = (['2-1.txt', '2-1/3-1.txt', '2-1/3-1/0-1.txt'], ['2-1/', '2-1/3-1/', '2-1/3-1/0-1/'])
+        assert client.get_files_and_directories('1-1', is_recursive=True) == result
+        assert client.get_files_and_directories('./1-1', is_recursive=True) == result
+        assert client.get_files_and_directories('./1-1/', is_recursive=True) == result
+        assert client.get_files_and_directories('/TDD/1-1', is_recursive=True) == result
+        assert client.get_files_and_directories('/TDD/1-1/', is_recursive=True) == result
+
+        result = ['1-1.txt', '1-2.txt', '1-1/', '1-2/']
+        assert client.get_contents('', is_recursive=False) == result
+        assert client.get_contents('.', is_recursive=False) == result
+        assert client.get_contents('./', is_recursive=False) == result
+        assert client.get_contents('/TDD', is_recursive=False) == result
+        assert client.get_contents('/TDD/', is_recursive=False) == result
+
+        result = ['1-1.txt', '1-2.txt', '1-1/2-1.txt', '1-1/2-1/3-1.txt', '1-1/2-1/3-1/0-1.txt', '1-2/2-2.txt', '1-2/2-2/3-2.txt', '1-2/2-2/3-2/0-2.txt', '1-1/', '1-2/', '1-1/2-1/', '1-1/2-1/3-1/', '1-1/2-1/3-1/0-1/', '1-2/2-2/', '1-2/2-2/3-2/', '1-2/2-2/3-2/0-2/']
+        assert client.get_contents('', is_recursive=True) == result
+        assert client.get_contents('.', is_recursive=True) == result
+        assert client.get_contents('./', is_recursive=True) == result
+        assert client.get_contents('/TDD', is_recursive=True) == result
+        assert client.get_contents('/TDD/', is_recursive=True) == result
+
+        result = ['2-1.txt', '2-1/']
+        assert client.get_contents('1-1', is_recursive=False) == result
+        assert client.get_contents('./1-1', is_recursive=False) == result
+        assert client.get_contents('./1-1/', is_recursive=False) == result
+        assert client.get_contents('/TDD/1-1', is_recursive=False) == result
+        assert client.get_contents('/TDD/1-1/', is_recursive=False) == result
+
+        result = ['2-1.txt', '2-1/3-1.txt', '2-1/3-1/0-1.txt', '2-1/', '2-1/3-1/', '2-1/3-1/0-1/']
+        assert client.get_contents('1-1', is_recursive=True) == result
+        assert client.get_contents('./1-1', is_recursive=True) == result
+        assert client.get_contents('./1-1/', is_recursive=True) == result
+        assert client.get_contents('/TDD/1-1', is_recursive=True) == result
+        assert client.get_contents('/TDD/1-1/', is_recursive=True) == result
+
+        result = ['1-1.txt', '1-2.txt']
+        assert client.get_files('', is_recursive=False) == result
+        assert client.get_files('.', is_recursive=False) == result
+        assert client.get_files('./', is_recursive=False) == result
+        assert client.get_files('/TDD', is_recursive=False) == result
+        assert client.get_files('/TDD/', is_recursive=False) == result
+
+        result = ['1-1.txt', '1-2.txt', '1-1/2-1.txt', '1-1/2-1/3-1.txt', '1-1/2-1/3-1/0-1.txt', '1-2/2-2.txt', '1-2/2-2/3-2.txt', '1-2/2-2/3-2/0-2.txt']
+        assert client.get_files('', is_recursive=True) == result
+        assert client.get_files('.', is_recursive=True) == result
+        assert client.get_files('./', is_recursive=True) == result
+        assert client.get_files('/TDD', is_recursive=True) == result
+        assert client.get_files('/TDD/', is_recursive=True) == result
+
+        result = ['2-1.txt']
+        assert client.get_files('1-1', is_recursive=False) == result
+        assert client.get_files('./1-1', is_recursive=False) == result
+        assert client.get_files('./1-1/', is_recursive=False) == result
+        assert client.get_files('/TDD/1-1', is_recursive=False) == result
+        assert client.get_files('/TDD/1-1/', is_recursive=False) == result
+
+        result = ['2-1.txt', '2-1/3-1.txt', '2-1/3-1/0-1.txt']
+        assert client.get_files('1-1', is_recursive=True) == result
+        assert client.get_files('./1-1', is_recursive=True) == result
+        assert client.get_files('./1-1/', is_recursive=True) == result
+        assert client.get_files('/TDD/1-1', is_recursive=True) == result
+        assert client.get_files('/TDD/1-1/', is_recursive=True) == result
+
+        result = ['1-1/', '1-2/']
+        assert client.get_directories('', is_recursive=False) == result
+        assert client.get_directories('.', is_recursive=False) == result
+        assert client.get_directories('./', is_recursive=False) == result
+        assert client.get_directories('/TDD', is_recursive=False) == result
+        assert client.get_directories('/TDD/', is_recursive=False) == result
+
+        result = ['1-1/', '1-2/', '1-1/2-1/', '1-1/2-1/3-1/', '1-1/2-1/3-1/0-1/', '1-2/2-2/', '1-2/2-2/3-2/', '1-2/2-2/3-2/0-2/']
+        assert client.get_directories('', is_recursive=True) == result
+        assert client.get_directories('.', is_recursive=True) == result
+        assert client.get_directories('./', is_recursive=True) == result
+        assert client.get_directories('/TDD', is_recursive=True) == result
+        assert client.get_directories('/TDD/', is_recursive=True) == result
+
+        result = ['2-1/']
+        assert client.get_directories('1-1', is_recursive=False) == result
+        assert client.get_directories('./1-1', is_recursive=False) == result
+        assert client.get_directories('./1-1/', is_recursive=False) == result
+        assert client.get_directories('/TDD/1-1', is_recursive=False) == result
+        assert client.get_directories('/TDD/1-1/', is_recursive=False) == result
+
+        result = ['2-1/', '2-1/3-1/', '2-1/3-1/0-1/']
+        assert client.get_directories('1-1', is_recursive=True) == result
+        assert client.get_directories('./1-1', is_recursive=True) == result
+        assert client.get_directories('./1-1/', is_recursive=True) == result
+        assert client.get_directories('/TDD/1-1', is_recursive=True) == result
+        assert client.get_directories('/TDD/1-1/', is_recursive=True) == result
     test()
