@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import Optional, List
+from typing import Optional, List, Union
 from pathlib import PurePosixPath
 import paramiko
 
@@ -40,10 +40,41 @@ class SFTPClient(IFTPClient):
             self.ssh.close()
             self.ssh = None
 
+    def is_exist(self, remote_path: str) -> bool:
+        try:
+            self.client.stat(remote_path)
+            return True
+        except FileNotFoundError:
+            return False
+
     def create_directory(self, remote_path: str, is_exist_ok: bool = True) -> None:
+        split = PurePosixPath(remote_path).parts
+        for i in range(len(split)):
+            directory_object = PurePosixPath()
+            for directory in split[:i + 1]:
+                directory_object = directory_object / directory
+            directory = str(directory_object)
+            if self.is_exist(directory):
+                if directory == remote_path:
+                    if not is_exist_ok:
+                        # TODO(hunhoekim): make exception
+                        raise Exception()
+            else:
+                self.client.mkdir(directory)
+
+    def delete_directory(self, remote_path: str) -> None:
         pass
 
-    def set_working_directory(self, remote_path: str, create_directory: bool = True) -> None:
+    def delete_file(self, remote_path: str) -> None:
+        pass
+
+    def delete(self, remote_path: str) -> None:
+        pass
+
+    def delete_contents_in_directory(self, remote_path: str) -> None:
+        pass
+
+    def set_working_directory(self, remote_path: str, create_if_not_exist: bool = True) -> None:
         self.client.chdir(remote_path)
 
     def get_working_directory(self) -> str:
@@ -118,11 +149,27 @@ if __name__ == '__main__':
         client = SFTPClient(host=host, username=username, password=password)
         assert client.get_working_directory() == '/'
 
-        client.set_working_directory('TDD')
+        assert client.is_exist('') is True
+        assert client.is_exist('.') is True
+        assert client.is_exist('./') is True
+        assert client.is_exist('/') is True
+
+        assert client.is_exist('TDD') is True
+        assert client.is_exist('./TDD') is True
+        assert client.is_exist('./TDD/') is True
+        assert client.is_exist('/TDD') is True
+        assert client.is_exist('/TDD/') is True
+
+        assert client.is_exist('/TDD2') is False
+
+        client.create_directory('A/B/C', is_exist_ok=False)
+        client.create_directory('/A/B/C', is_exist_ok=False)
+
+        client.set_working_directory('TDD', create_if_not_exist=False)
         assert client.get_working_directory() == '/TDD/'
-        client.set_working_directory('/TDD')
+        client.set_working_directory('/TDD', create_if_not_exist=False)
         assert client.get_working_directory() == '/TDD/'
-        client.set_working_directory('/TDD/')
+        client.set_working_directory('/TDD/', create_if_not_exist=False)
         assert client.get_working_directory() == '/TDD/'
 
         result = (['1-1.txt', '1-2.txt'], ['1-1/', '1-2/'])
