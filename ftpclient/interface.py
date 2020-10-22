@@ -5,6 +5,18 @@ from abc import ABCMeta, abstractmethod
 TIMEOUT = 600
 
 
+class FTPFileNotExistError(FileNotFoundError):
+    def __init__(self, remote_path: str):
+        super().__init__(1, f'File does not exist. ')
+        self.filename = remote_path
+
+
+class FTPDirectoryNotExistError(FileNotFoundError):
+    def __init__(self, remote_path: str):
+        super().__init__(1, f'Directory does not exist. ')
+        self.filename = remote_path
+
+
 class IFTPClient(metaclass=ABCMeta):
     @abstractmethod
     def set_working_directory(self, remote_path: str, create_directory: bool = True) -> None:

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-
-from typing import Optional, List, Union
+# builtin packages
 from pathlib import PurePosixPath
+from typing import Optional, List
+import stat
+# site packages
 import paramiko
-
-from ftpclient.interface import IFTPClient, TIMEOUT
+# ootz.ftpclient packages
+from ftpclient.interface import (IFTPClient, TIMEOUT, FTPFileNotExistError, FTPDirectoryNotExistError)
 
 
 class SFTPClient(IFTPClient):
@@ -47,6 +49,18 @@ class SFTPClient(IFTPClient):
         except FileNotFoundError:
             return False
 
+    def is_directory(self, remote_path: str) -> bool:
+        if self.is_exist(remote_path):
+            return stat.S_ISDIR(self.client.stat(remote_path).st_mode)
+        else:
+            raise FTPDirectoryNotExistError(remote_path)
+
+    def is_file(self, remote_path: str) -> bool:
+        if self.is_exist(remote_path):
+            return stat.S_ISREG(self.client.stat(remote_path).st_mode)
+        else:
+            raise FTPFileNotExistError(remote_path)
+
     def create_directory(self, remote_path: str, is_exist_ok: bool = True) -> None:
         split = PurePosixPath(remote_path).parts
         for i in range(len(split)):
@@ -55,21 +69,46 @@ class SFTPClient(IFTPClient):
                 directory_object = directory_object / directory
             directory = str(directory_object)
             if self.is_exist(directory):
-                if directory == remote_path:
-                    if not is_exist_ok:
-                        # TODO(hunhoekim): make exception
-                        raise Exception()
+                if self.is_directory(directory):
+                    if is_exist_ok:
+                        continue
+                    else:
+                        error = FileExistsError(1, f'Directory already exists. ')
+                        error.filename = directory
+                        raise error
+                else:
+                    error = NotADirectoryError(1, f'This path is not a directory. ')
+                    error.filename = directory
+                    raise error
             else:
                 self.client.mkdir(directory)
 
     def delete_directory(self, remote_path: str) -> None:
-        pass
+        if self.is_directory(remote_path):
+            self.client.rmdir(remote_path)
+        else:
+            raise FTPDirectoryNotExistError(remote_path)
 
     def delete_file(self, remote_path: str) -> None:
-        pass
+        if self.is_file(remote_path):
+            self.client.remove(remote_path)
+        else:
+            raise FTPFileNotExistError(remote_path)
 
     def delete(self, remote_path: str) -> None:
-        pass
+        if self.is_exist(remote_path):
+            if self.is_file(remote_path):
+                self.delete_file(remote_path)
+            elif self.is_directory(remote_path):
+                self.delete_directory(remote_path)
+            else:
+                error = OSError(1, f'This type is not supported. ')
+                error.filename = remote_path
+                raise error
+        else:
+            error = FileNotFoundError(1, f'This path does not exist. ')
+            error.filename = remote_path
+            raise error
 
     def delete_contents_in_directory(self, remote_path: str) -> None:
         pass
@@ -139,7 +178,7 @@ class SFTPClient(IFTPClient):
         pass
 
     def get_file_size(self, remote_path: str) -> int:
-        pass
+        return self.client.stat.st_size
 
 
 if __name__ == '__main__':
@@ -147,6 +186,7 @@ if __name__ == '__main__':
         host = '127.0.0.1'
         username = password = 'hunhoekim'
         client = SFTPClient(host=host, username=username, password=password)
+
         assert client.get_working_directory() == '/'
 
         assert client.is_exist('') is True
@@ -160,9 +200,15 @@ if __name__ == '__main__':
         assert client.is_exist('/TDD') is True
         assert client.is_exist('/TDD/') is True
 
-        assert client.is_exist('/TDD2') is False
+        assert client.is_exist('non-exist-directory') is False
+        assert client.is_exist('/non-exist-directory') is False
+        assert client.is_exist('/non-exist-directory/') is False
 
-        client.create_directory('A/B/C', is_exist_ok=False)
+        client.delete_directory('A/B/C')
+        try:
+            client.create_directory('A/B/C', is_exist_ok=False)
+        except FileExistsError as e:
+            pass
         client.create_directory('/A/B/C', is_exist_ok=False)
 
         client.set_working_directory('TDD', create_if_not_exist=False)
